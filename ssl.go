@@ -3,7 +3,9 @@ package ssl_certificate
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"log"
+	netUrl "net/url"
 	"time"
 )
 
@@ -13,12 +15,12 @@ type SSLCertificate struct {
 
 var PORT = "443"
 
-func CreateForHostname(url string) (*SSLCertificate, error) {
+func CreateForHostname(host string) (*SSLCertificate, error) {
 	cfg := tls.Config{
 		InsecureSkipVerify: true,
-		ServerName:         url,
+		ServerName:         host,
 	}
-	conn, err := tls.Dial("tcp", url+":"+PORT, &cfg)
+	conn, err := tls.Dial("tcp", host+":"+PORT, &cfg)
 	if err != nil {
 		log.Fatalln("Connection failed: " + err.Error())
 		return nil, err
@@ -29,6 +31,23 @@ func CreateForHostname(url string) (*SSLCertificate, error) {
 	return &SSLCertificate{
 		certificate: cert,
 	}, nil
+}
+
+func CreateForURL(rawUrl string) (*SSLCertificate, error) {
+	url, err := netUrl.Parse(rawUrl)
+	if err != nil {
+		return nil, err
+	}
+
+	if url.Hostname() == "" {
+		return nil, errors.New("invalid URL")
+	}
+
+	if url.Scheme != "https" {
+		return nil, errors.New("url scheme must be https")
+	}
+
+	return CreateForHostname(url.Hostname())
 }
 
 func (x SSLCertificate) GetIssuer() string {
@@ -52,9 +71,17 @@ func (x SSLCertificate) IsExpired() bool {
 }
 
 func (x SSLCertificate) LifespanInDays() int {
-	return int(x.certificate.NotAfter.Sub(x.certificate.NotBefore) / (24 * time.Hour))
+	return int(x.certificate.NotAfter.Sub(x.certificate.NotBefore).Hours() / 24)
 }
 
 func (x SSLCertificate) IsSelfSigned() bool {
 	return x.GetIssuer() == x.GetDomain()
+}
+
+func (x SSLCertificate) DaysUntilExpiredDate() int {
+	return int(x.certificate.NotAfter.Sub(time.Now()).Hours() / 24)
+}
+
+func (x SSLCertificate) ExpiredDate() time.Time {
+	return x.certificate.NotAfter
 }
